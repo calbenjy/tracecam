@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#111827">
+<title>TraceCam</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Arial,sans-serif;overflow:hidden}
+#camera{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;background:#111;z-index:0}
+#overlay{position:fixed;left:50%;top:50%;max-width:100vw;max-height:100vh;transform:translate(-50%,-50%);transform-origin:center;pointer-events:none;user-select:none;z-index:2}
+.top{position:fixed;top:env(safe-area-inset-top,12px);left:0;right:0;padding:12px;display:flex;gap:10px;align-items:center;z-index:10}
+.spacer{flex:1}
+button,.filebtn{border:1px solid rgba(255,255,255,.14);color:#fff;background:rgba(17,24,39,.9);border-radius:999px;padding:11px 15px;font-weight:700;font-size:15px;backdrop-filter:blur(12px);box-shadow:0 4px 20px #0005}
+button:active,.filebtn:active{transform:scale(.97)}
+.filebtn{display:inline-block;cursor:pointer}
+input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+#empty{position:fixed;z-index:8;left:50%;top:50%;transform:translate(-50%,-50%);width:min(88%,390px);padding:26px;text-align:center;border-radius:24px;background:rgba(17,24,39,.92);backdrop-filter:blur(14px)}
+#empty h1{margin:0 0 8px;font-size:30px}
+#empty p{margin:0 0 18px;color:#d1d5db;line-height:1.4}
+#panel{position:fixed;z-index:10;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);padding:15px;border-radius:22px;background:rgba(17,24,39,.92);backdrop-filter:blur(18px);border:1px solid #ffffff18}
+.row{display:flex;align-items:center;gap:10px;margin:7px 0}
+.row label{width:80px;font-size:13px;color:#d1d5db}
+input[type=range]{flex:1;accent-color:#fff}
+.value{width:45px;text-align:right;font-size:13px;color:#e5e7eb}
+.actions{display:flex;gap:8px;margin-top:10px}.actions button{flex:1}
+#locked{display:none;position:fixed;z-index:11;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);padding:11px 14px;background:rgba(17,24,39,.9);border-radius:999px}
+#status{position:fixed;z-index:20;top:calc(env(safe-area-inset-top,0px) + 64px);left:50%;transform:translateX(-50%);background:#111827ee;padding:9px 13px;border-radius:999px;font-size:13px;display:none;white-space:nowrap}
+</style>
+</head>
+<body>
+<video id="camera" autoplay playsinline muted></video>
+<img id="overlay" alt="" hidden>
+
+<div class="top" id="top">
+  <button id="chooseBtn">📷 Choose picture</button>
+  <input id="picker" type="file" accept="image/*">
+  <div class="spacer"></div>
+  <button id="torch">🔦</button>
+  <button id="lock">🔓</button>
+</div>
+
+<div id="empty">
+  <h1>TraceCam</h1>
+  <p>Choose a picture, place your iPhone above your paper, and trace the image from the screen.</p>
+  <button id="chooseBtn2">Choose a picture</button>
+</div>
+
+<div id="panel" hidden>
+  <div class="row"><label>Opacity</label><input id="opacity" type="range" min=".05" max="1" value=".55" step=".01"><span class="value" id="opacityV">55%</span></div>
+  <div class="row"><label>Zoom</label><input id="zoom" type="range" min=".3" max="2.5" value="1" step=".01"><span class="value" id="zoomV">100%</span></div>
+  <div class="row"><label>Rotate</label><input id="rotate" type="range" min="-180" max="180" value="0" step="1"><span class="value" id="rotateV">0°</span></div>
+  <div class="actions">
+    <button id="reset">↺ Reset</button>
+    <button id="hide">👁 Hide</button>
+    <button id="newPic">＋ New</button>
+  </div>
+</div>
+
+<div id="locked">🔒 Locked · tap here to unlock</div>
+<div id="status"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const video=$('camera'), overlay=$('overlay'), picker=$('picker');
+const empty=$('empty'), panel=$('panel'), top=$('top'), locked=$('locked'), status=$('status');
+let stream=null, torch=false, lockedState=false;
+
+function msg(t){status.textContent=t;status.style.display='block';clearTimeout(msg.t);msg.t=setTimeout(()=>status.style.display='none',3000)}
+function apply(){
+ overlay.style.opacity=$('opacity').value;
+ overlay.style.transform=`translate(-50%,-50%) scale(${$('zoom').value}) rotate(${$('rotate').value}deg)`;
+ $('opacityV').textContent=Math.round($('opacity').value*100)+'%';
+ $('zoomV').textContent=Math.round($('zoom').value*100)+'%';
+ $('rotateV').textContent=$('rotate').value+'°';
+}
+function openPicker(){ picker.value=''; picker.click(); }
+async function loadPhoto(file){
+ if(!file){msg('No picture was selected.');return}
+ if(!file.type.startsWith('image/')){msg('Please choose an image.');return}
+ try{
+   const reader=new FileReader();
+   reader.onload=()=>{
+     overlay.onload=()=>{
+       overlay.hidden=false;
+       empty.style.display='none';
+       panel.hidden=false;
+       apply();
+       msg('Picture loaded ✓');
+     };
+     overlay.onerror=()=>msg('The picture could not be displayed.');
+     overlay.src=reader.result;
+   };
+   reader.onerror=()=>msg('Safari could not read that picture.');
+   reader.readAsDataURL(file);
+ }catch(e){msg('Could not load the picture.')}
+}
+picker.addEventListener('change',e=>{
+ const file=e.target.files && e.target.files[0];
+ loadPhoto(file);
+});
+$('chooseBtn').addEventListener('click',openPicker);
+$('chooseBtn2').addEventListener('click',openPicker);
+$('newPic').addEventListener('click',openPicker);
+$('opacity').addEventListener('input',apply);
+$('zoom').addEventListener('input',apply);
+$('rotate').addEventListener('input',apply);
+$('reset').addEventListener('click',()=>{$('opacity').value=.55;$('zoom').value=1;$('rotate').value=0;apply()});
+$('hide').addEventListener('click',()=>{top.style.display='none';panel.hidden=true;locked.style.display='block';msg('Controls hidden')});
+$('lock').addEventListener('click',()=>{lockedState=!lockedState; $('lock').textContent=lockedState?'🔒':'🔓';panel.hidden=lockedState;locked.style.display=lockedState?'block':'none'});
+locked.addEventListener('click',()=>{lockedState=false;$('lock').textContent='🔓';locked.style.display='none';top.style.display='flex';panel.hidden=false});
+
+async function startCamera(){
+ if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){msg('Camera access is not available here. Try Safari over HTTPS.');return}
+ try{
+   stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+   video.srcObject=stream;
+ }catch(e){
+   console.error(e);
+   msg('Camera blocked — allow Camera for this website in Safari.');
+ }
+}
+$('torch').addEventListener('click',async()=>{
+ const track=stream?.getVideoTracks()[0];
+ if(!track){msg('Camera is not active.');return}
+ const caps=track.getCapabilities?.();
+ if(!caps?.torch){msg('Flashlight control is unavailable.');return}
+ try{torch=!torch;await track.applyConstraints({advanced:[{torch}]});$('torch').textContent=torch?'💡':'🔦'}catch(e){msg('Flashlight unavailable.')}
+});
+apply();
+startCamera();
+</script>
+</body>
+</html>
